@@ -1,6 +1,14 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
-#include <XPT2046_Touchscreen.h>
+#include <XPT2046_Bitbang.h>
+#include "FS.h"
+#include "SD.h"
+#include "SPI.h"
+
+#define SD_SCK 18
+#define SD_MISO 19
+#define SD_MOSI 23
+#define SD_CS 5
 
 // SPI pins
 
@@ -10,16 +18,17 @@
 #define XPT2046_CLK 25
 #define XPT2046_CS 33
 SPIClass touchscreenSpi = SPIClass(VSPI);
-XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
+
+// XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
+XPT2046_Bitbang touchscreen(XPT2046_MOSI, XPT2046_MISO, XPT2046_CLK, XPT2046_CS);
+
 uint16_t touchScreenMinimumX = 200, touchScreenMaximumX = 3700, touchScreenMinimumY = 240, touchScreenMaximumY = 3800;
 
 #define TFT_HOR_RES 320
 #define TFT_VER_RES 240
 
-/*LVGL draw into this buffer, 1/10 screen size usually works well. The size is in bytes*/
 #define DRAW_BUF_SIZE (TFT_HOR_RES * TFT_VER_RES / 10 * (LV_COLOR_DEPTH / 8))
 
-/* LVGL calls it when a rendered image needs to copied to the display*/
 void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
 	/*Call it to tell LVGL you are ready*/
@@ -37,7 +46,6 @@ void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 	if (touchscreen.touched())
 	{
 		TS_Point p = touchscreen.getPoint();
-		// Some very basic auto calibration so it doesn't go out of range
 		if (p.x < touchScreenMinimumX)
 			touchScreenMinimumX = p.x;
 		if (p.x > touchScreenMaximumX)
@@ -46,9 +54,8 @@ void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 			touchScreenMinimumY = p.y;
 		if (p.y > touchScreenMaximumY)
 			touchScreenMaximumY = p.y;
-		// Map this to the pixel position
-		data->point.x = map(p.x, touchScreenMinimumX, touchScreenMaximumX, 1, TFT_HOR_RES); /* Touchscreen X calibration */
-		data->point.y = map(p.y, touchScreenMinimumY, touchScreenMaximumY, 1, TFT_VER_RES); /* Touchscreen Y calibration */
+		data->point.x = map(p.x, touchScreenMinimumX, touchScreenMaximumX, 1, TFT_HOR_RES);
+		data->point.y = map(p.y, touchScreenMinimumY, touchScreenMaximumY, 1, TFT_VER_RES);
 		data->state = LV_INDEV_STATE_PRESSED;
 	}
 	else
@@ -87,39 +94,55 @@ void getPasswordScreenLayout()
 
 	lv_obj_t *selectCategoryDD = lv_dropdown_create(getPasswordScreen);
 	lv_dropdown_set_options(selectCategoryDD, "web\n"
-								"ssh\n");
+											  "ssh\n");
 
 	lv_obj_align(selectCategoryDD, LV_ALIGN_LEFT_MID, 0, 0);
 	// lv_obj_add_event_cb(selectCategoryDD, event_handler, LV_EVENT_ALL, NULL);
 
 	lv_obj_t *selectServiceDD = lv_dropdown_create(getPasswordScreen);
 	lv_dropdown_set_options(selectServiceDD, "gmail\n"
-								"protonmail\n");
+											 "protonmail\n");
 
-	lv_obj_align(selectServiceDD, LV_ALIGN_LEFT_MID, 0, 0);
+	lv_obj_align(selectServiceDD, LV_ALIGN_RIGHT_MID, 0, 0);
 	// lv_obj_add_event_cb(selectServiceDD, event_handler, LV_EVENT_ALL, NULL);
 
+	lv_obj_t *getBtnLabel;
 
+	lv_obj_t *getServicePasswords = lv_btn_create(getPasswordScreen);
+	// lv_obj_add_event_cb(getServicePasswords, event_handler, LV_EVENT_ALL, NULL);
+	lv_obj_align(getServicePasswords, LV_ALIGN_BOTTOM_MID, 0, -40); // LV_ALIGN_BOTTOM_MID
 
+	getBtnLabel = lv_label_create(getServicePasswords);
+	lv_label_set_text(getBtnLabel, "Get");
+	lv_obj_center(getServicePasswords);
 }
 
 void setup()
 {
-	// Some basic info on the Serial console
 	Serial.begin(115200);
 
-	// Initialise the touchscreen
-	touchscreenSpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS); /* Start second SPI bus for touchscreen */
-	touchscreen.begin(touchscreenSpi);										   /* Touchscreen init */
-	touchscreen.setRotation(3);												   /* Inverted landscape orientation to match screen */
+	// SD Card
 
-	// Initialise LVGL
+	if (!SD.begin(true))
+	{
+		Serial.prinf("SPIFFS Mount Failed\n");
+		while (1) {} // oh no, we loose all data....
+	}
+	else Serial.printf("SPIFS init OK\n");
+
+	// Touch screen
+
+	touchscreenSpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+	touchscreen.begin(touchscreenSpi);
+	touchscreen.setRotation(3);
+
+	// Lvgl
+
 	lv_init();
 	draw_buf = new uint8_t[DRAW_BUF_SIZE];
 	lv_display_t *disp;
 	disp = lv_tft_espi_create(TFT_HOR_RES, TFT_VER_RES, draw_buf, DRAW_BUF_SIZE);
 
-	// Initialize the XPT2046 input device driver
 	indev = lv_indev_create();
 	lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
 	lv_indev_set_read_cb(indev, my_touchpad_read);
@@ -162,8 +185,8 @@ void setup()
 
 void loop()
 {
-	lv_tick_inc(millis() - lastTick); // Update the tick timer. Tick is new for LVGL 9
+	lv_tick_inc(millis() - lastTick);
 	lastTick = millis();
-	lv_timer_handler(); // Update the UI
+	lv_timer_handler();
 	delay(5);
 }
