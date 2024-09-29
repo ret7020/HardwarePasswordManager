@@ -1,1 +1,0 @@
-#define PASSWORDS_FILE_PATH passwords
