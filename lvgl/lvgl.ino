@@ -40,10 +40,12 @@ char servicesList[1024];
 
 // Screens
 lv_obj_t *getPasswordScreen;
+lv_obj_t *showPasswordScreen;
+
+
 lv_obj_t *selectServiceDD;
 lv_obj_t *selectCategoryDD;
-
-lv_obj_t *showPasswordScreen;
+lv_obj_t *passwordsShowTable;
 
 /*Read the touchpad*/
 void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
@@ -143,12 +145,14 @@ static void getPasswordsHandler(lv_event_t * event) {
 
 	JsonArray keyArray = readedPasswords[currCategory][currService];
 
+	uint8_t countRows = 1;
     for (JsonArray arr : keyArray) {
-        Serial.printf("Login: %s\n", arr[0].as<const char*>());
-		Serial.printf("Password: %s\n\n", arr[1].as<const char*>());
-
+		lv_table_set_cell_value(passwordsShowTable, countRows, 0, arr[0].as<const char*>()); // Login
+		lv_table_set_cell_value(passwordsShowTable, countRows, 1, arr[1].as<const char*>()); // Password
+		countRows++;
     }
 
+	lv_scr_load(showPasswordScreen);
 
 	// for (JsonObject elem : doc[currCategory][currService].as<JsonArray>()) {
 	// 	// Serial.printf("%s\n", elem[0].c_str());
@@ -186,6 +190,19 @@ void getPasswordScreenLayout()
 	getBtnLabel = lv_label_create(getServicePasswords);
 	lv_label_set_text(getBtnLabel, "Get");
 	lv_obj_center(getServicePasswords);
+}
+
+
+void showPasswordsScreenLayout(){
+	// lv_obj_t * label = lv_label_create(showPasswordScreen);
+    // lv_label_set_text_fmt(label, "Passwords");
+    // lv_obj_align(label, LV_ALIGN_TOP_MID, 0, -10);
+
+	passwordsShowTable = lv_table_create(showPasswordScreen);
+	lv_table_set_cell_value(passwordsShowTable, 0, 0, "Login");
+	lv_table_set_cell_value(passwordsShowTable, 0, 1, "Passwords");
+	lv_obj_center(passwordsShowTable);
+
 }
 
 void setup()
@@ -243,6 +260,7 @@ void setup()
 
 	// Create screens
 	getPasswordScreen = lv_obj_create(NULL);
+	showPasswordScreen = lv_obj_create(NULL);
 
 	// Main screen input passsword
 
@@ -271,6 +289,7 @@ void setup()
 	lv_textarea_set_one_line(passwordTa, true);
 
 	lv_keyboard_set_textarea(kb, passwordTa);
+	showPasswordsScreenLayout();
 
 	Serial.printf("Setup done");
 }
