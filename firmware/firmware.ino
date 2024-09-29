@@ -6,6 +6,8 @@
 #include "SPI.h"
 #include "SD.h"
 #include <ArduinoJson.h>
+#include "Cipher.h"
+#include <string>
 
 // Touch screen SPI pins
 #define XPT2046_IRQ 36
@@ -16,8 +18,10 @@
 
 // Some config
 #define PASSWORDS_FILE_PATH "/passwords.crypt"
+#define MAINTANCE_MODE // For dump/write passwords on device via PC (maybe for increasing security you need to disable this feature)
 
 SPIClass touchscreenSpi = SPIClass(VSPI);
+Cipher *cipher = new Cipher();
 
 XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 uint16_t touchScreenMinimumX = 200, touchScreenMaximumX = 3700, touchScreenMinimumY = 240, touchScreenMaximumY = 3800;
@@ -42,11 +46,13 @@ char servicesList[1024];
 lv_obj_t *getPasswordScreen;
 lv_obj_t *showPasswordScreen;
 
+#ifdef MAINTANCE_MODE
+lv_obj_t *maintanceScreen;
+#endif
 
 lv_obj_t *selectServiceDD;
 lv_obj_t *selectCategoryDD;
 lv_obj_t *passwordsShowTable;
-
 
 /*Read the touchpad*/
 void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
@@ -79,67 +85,76 @@ uint32_t lastTick = 0;
 static void my_keyboard_event_cb(lv_event_t *e)
 {
 	const char *password = lv_textarea_get_text(passwordTa);
-	Serial.printf("Inputed pass: %s\n", password);
-	if (!strcmp(password, "123")) // TODO add decrypter
+	cipher->setKey((char *)password);
+
+	// Load passswords{
+	File file = SPIFFS.open(PASSWORDS_FILE_PATH);
+
+	if (!file)
 	{
-		// Load passswords{
-		File file = SPIFFS.open(PASSWORDS_FILE_PATH);
-		if (!file)
+		Serial.printf("Fatal error; Can't read file\n");
+		while (1)
 		{
-			Serial.printf("Fatal error; Can't read file\n");
-			while (1){}
 		}
+	}
 
-		if (file.available()) deserializeJson(readedPasswords, file.readStringUntil('\n'));
-		file.close();
-		// Iterate over categories
-		serializeJson(readedPasswords, Serial);
+	if (file.available())
+	{
+		String fileContent = "";
+		while (file.available()) fileContent += (char)file.read();
+		file.close(); 
+		String decipheredString = cipher->decryptString(fileContent);
 
-		JsonObject root = readedPasswords.as<JsonObject>();
-		uint8_t index = 0;
-		
-		for (JsonPair kv : root){
-			strcat(categoriesList, kv.key().c_str());
-			strcat(categoriesList, "\n");
-		} 
-		categoriesList[strlen(categoriesList) - 1] = '\0';
+		DeserializationError err = deserializeJson(readedPasswords, decipheredString);
+		if (!err)
+		{
+			// Iterate over categories
 
-		// printf("Categories: %s", categoriesList);
+			JsonObject root = readedPasswords.as<JsonObject>();
+			uint8_t index = 0;
 
-		// Load UI
-		getPasswordScreenLayout();
-		lv_scr_load(getPasswordScreen);
+			for (JsonPair kv : root)
+			{
+				strcat(categoriesList, kv.key().c_str());
+				strcat(categoriesList, "\n");
+			}
+			categoriesList[strlen(categoriesList) - 1] = '\0';
+
+			// printf("Categories: %s", categoriesList);
+
+			// Load UI
+			getPasswordScreenLayout();
+			lv_scr_load(getPasswordScreen);
+		}
 	}
 	else
-	{
-		Serial.printf("Invalid password\n");
-	}
+		file.close();
 }
 
-
-static void categorySelectHandler(lv_event_t * e)
+static void categorySelectHandler(lv_event_t *e)
 {
-    lv_obj_t * obj = (lv_obj_t *)lv_event_get_target(e);
+	lv_obj_t *obj = (lv_obj_t *)lv_event_get_target(e);
 	char buf[32];
 	lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
 	JsonObject services = readedPasswords[buf].as<JsonObject>();
 	memset(&servicesList[0], 0, sizeof(servicesList));
-	for (JsonPair kv : services){
-		Serial.printf("Key: %s\n", kv.key().c_str());
+	for (JsonPair kv : services)
+	{
 		strcat(servicesList, kv.key().c_str());
 		strcat(servicesList, "\n");
 	}
-	if (strlen(servicesList) >= 1){
+	if (strlen(servicesList) >= 1)
+	{
 		servicesList[strlen(servicesList) - 1] = '\0';
 		lv_dropdown_set_options(selectServiceDD, servicesList);
 	}
-	
+
 	// readedPasswords[buf]
-	Serial.printf("New category: %s", buf);
-    
+	// Serial.printf("New category: %s", buf);
 }
 
-static void getPasswordsHandler(lv_event_t * event) {
+static void getPasswordsHandler(lv_event_t *event)
+{
 	char currCategory[32], currService[32];
 	lv_dropdown_get_selected_str(selectCategoryDD, currCategory, sizeof(currCategory));
 	lv_dropdown_get_selected_str(selectServiceDD, currService, sizeof(currService));
@@ -147,18 +162,18 @@ static void getPasswordsHandler(lv_event_t * event) {
 	JsonArray keyArray = readedPasswords[currCategory][currService];
 
 	uint8_t countRows = 1;
-    for (JsonArray arr : keyArray) {
-		lv_table_set_cell_value(passwordsShowTable, countRows, 0, arr[0].as<const char*>()); // Login
-		lv_table_set_cell_value(passwordsShowTable, countRows, 1, arr[1].as<const char*>()); // Password
+	for (JsonArray arr : keyArray)
+	{
+		lv_table_set_cell_value(passwordsShowTable, countRows, 0, arr[0].as<const char *>()); // Login
+		lv_table_set_cell_value(passwordsShowTable, countRows, 1, arr[1].as<const char *>()); // Password
 		countRows++;
-    }
+	}
 
 	lv_scr_load(showPasswordScreen);
 
 	// for (JsonObject elem : doc[currCategory][currService].as<JsonArray>()) {
 	// 	// Serial.printf("%s\n", elem[0].c_str());
 	// }
-
 }
 
 void getPasswordScreenLayout()
@@ -193,18 +208,18 @@ void getPasswordScreenLayout()
 	lv_obj_center(getServicePasswords);
 }
 
-
-void backToPasswordsSelect(lv_event_t * event){
+void backToPasswordsSelect(lv_event_t *event)
+{
 	lv_scr_load(getPasswordScreen);
 }
 
-void showPasswordsScreenLayout(){
+void showPasswordsScreenLayout()
+{
 
 	passwordsShowTable = lv_table_create(showPasswordScreen);
 	lv_table_set_cell_value(passwordsShowTable, 0, 0, "Login");
 	lv_table_set_cell_value(passwordsShowTable, 0, 1, "Passwords");
 	lv_obj_center(passwordsShowTable);
-
 
 	lv_obj_t *backBtnLabel;
 
@@ -215,10 +230,18 @@ void showPasswordsScreenLayout(){
 
 	backBtnLabel = lv_label_create(backBtn);
 	lv_label_set_text(backBtnLabel, "Back");
-
-
-	
 }
+
+#ifdef MAINTANCE_MODE
+void maintanceScreenLayout()
+{
+	lv_obj_t *label2 = lv_label_create(maintanceScreen);
+	lv_label_set_long_mode(label2, LV_LABEL_LONG_SCROLL_CIRCULAR);
+	lv_obj_set_width(label2, 150);
+	lv_label_set_text(label2, "Maintance Mode: Device controlled via USB UART; Send sf_reboot to exit this mode...");
+	lv_obj_align(label2, LV_ALIGN_CENTER, 0, 0);
+}
+#endif
 
 void setup()
 {
@@ -226,18 +249,28 @@ void setup()
 
 	// SPIFS Card
 
-	if (!SPIFFS.begin(true)){
+	if (!SPIFFS.begin(true))
+	{
 		Serial.printf("Error in SD card init\n");
-		while (1){}
-	} else {
+		while (1)
+		{
+		}
+	}
+	else
+	{
 		Serial.printf("SPIFS ready\n");
 	}
 
 	// Check if passwords file exists, otherwise create new with default structure
 
+	// char* key = "0123456789012345";
+	// cipher->setKey(key);
+
+	// String data = "{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n";
+	// String cipherString = cipher->encryptString(data);
 
 	// File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-	// if (newFile.print("{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n")) Serial.printf("Passwords file create OK");
+	// if (newFile.print(cipherString)) Serial.printf("Passwords file create OK");
 	// newFile.close();
 
 	// File file = SPIFFS.open(PASSWORDS_FILE_PATH);
@@ -249,7 +282,6 @@ void setup()
 
 	// }
 	// file.close();
-	
 
 	// Touch screen
 
@@ -273,6 +305,10 @@ void setup()
 	// Create screens
 	getPasswordScreen = lv_obj_create(NULL);
 	showPasswordScreen = lv_obj_create(NULL);
+
+#ifdef MAINTANCE_MODE
+	maintanceScreen = lv_obj_create(NULL);
+#endif
 
 	// Main screen input passsword
 
@@ -303,7 +339,11 @@ void setup()
 	lv_keyboard_set_textarea(kb, passwordTa);
 	showPasswordsScreenLayout();
 
-	Serial.printf("Setup done");
+#ifdef MAINTANCE_MODE
+	maintanceScreenLayout();
+#endif
+
+	// Serial.printf("Setup done");
 }
 
 void loop()
@@ -312,4 +352,32 @@ void loop()
 	lastTick = millis();
 	lv_timer_handler();
 	delay(5);
+#ifdef MAINTANCE_MODE
+	if (Serial.available() > 3)
+	{
+		char serialBuffer[64];
+		uint32_t byteNum = 0;
+		while (Serial.available())
+		{
+			serialBuffer[byteNum] = Serial.read();
+			byteNum++;
+		}
+		if (13 <= strlen(serialBuffer) && (strncmp("set_maintance", serialBuffer, 13) == 0))
+		{
+			lv_scr_load(maintanceScreen);
+		}
+		else if (9 <= strlen(serialBuffer) && (strncmp("sf_reboot", serialBuffer, 9) == 0))
+		{
+			abort();
+		}
+		else if (13 <= strlen(serialBuffer) && (strncmp("internal_dump", serialBuffer, 13) == 0))
+		{
+			serializeJson(readedPasswords, Serial);
+		}
+		else if (13 <= strlen(serialBuffer) && (strncmp("fs_clear_init", serialBuffer, 13) == 0))
+		{
+			// serializeJson(readedPasswords, Serial);
+		}
+	}
+#endif
 }
