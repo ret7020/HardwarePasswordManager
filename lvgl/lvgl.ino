@@ -1,27 +1,25 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
-#include <XPT2046_Bitbang.h>
+#include <XPT2046_Touchscreen.h>
+#include "SPIFFS.h"
 #include "FS.h"
-#include "SD.h"
 #include "SPI.h"
+#include "SD.h"
+#include <ArduinoJson.h>
 
-#define SD_SCK 18
-#define SD_MISO 19
-#define SD_MOSI 23
-#define SD_CS 5
-
-// SPI pins
-
+// Touch screen SPI pins
 #define XPT2046_IRQ 36
 #define XPT2046_MOSI 32
 #define XPT2046_MISO 39
 #define XPT2046_CLK 25
 #define XPT2046_CS 33
+
+// Some config
+#define PASSWORDS_FILE_PATH "/passwords.crypt"
+
 SPIClass touchscreenSpi = SPIClass(VSPI);
 
-// XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
-XPT2046_Bitbang touchscreen(XPT2046_MOSI, XPT2046_MISO, XPT2046_CLK, XPT2046_CS);
-
+XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 uint16_t touchScreenMinimumX = 200, touchScreenMaximumX = 3700, touchScreenMinimumY = 240, touchScreenMaximumY = 3800;
 
 #define TFT_HOR_RES 320
@@ -31,14 +29,21 @@ uint16_t touchScreenMinimumX = 200, touchScreenMaximumX = 3700, touchScreenMinim
 
 void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-	/*Call it to tell LVGL you are ready*/
 	lv_disp_flush_ready(disp);
 }
 
 lv_obj_t *passwordTa;
+JsonDocument readedPasswords;
+
+char categoriesList[256];
+char servicesList[1024];
 
 // Screens
 lv_obj_t *getPasswordScreen;
+lv_obj_t *selectServiceDD;
+lv_obj_t *selectCategoryDD;
+
+lv_obj_t *showPasswordScreen;
 
 /*Read the touchpad*/
 void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
@@ -72,8 +77,33 @@ static void my_keyboard_event_cb(lv_event_t *e)
 {
 	const char *password = lv_textarea_get_text(passwordTa);
 	Serial.printf("Inputed pass: %s\n", password);
-	if (!strcmp(password, "123"))
+	if (!strcmp(password, "123")) // TODO add decrypter
 	{
+		// Load passswords{
+		File file = SPIFFS.open(PASSWORDS_FILE_PATH);
+		if (!file)
+		{
+			Serial.printf("Fatal error; Can't read file\n");
+			while (1){}
+		}
+
+		if (file.available()) deserializeJson(readedPasswords, file.readStringUntil('\n'));
+		file.close();
+		// Iterate over categories
+		serializeJson(readedPasswords, Serial);
+
+		JsonObject root = readedPasswords.as<JsonObject>();
+		uint8_t index = 0;
+		
+		for (JsonPair kv : root){
+			strcat(categoriesList, kv.key().c_str());
+			strcat(categoriesList, "\n");
+		} 
+		categoriesList[strlen(categoriesList) - 1] = '\0';
+
+		// printf("Categories: %s", categoriesList);
+
+		// Load UI
 		getPasswordScreenLayout();
 		lv_scr_load(getPasswordScreen);
 	}
@@ -81,6 +111,49 @@ static void my_keyboard_event_cb(lv_event_t *e)
 	{
 		Serial.printf("Invalid password\n");
 	}
+}
+
+
+static void categorySelectHandler(lv_event_t * e)
+{
+    lv_obj_t * obj = (lv_obj_t *)lv_event_get_target(e);
+	char buf[32];
+	lv_dropdown_get_selected_str(obj, buf, sizeof(buf));
+	JsonObject services = readedPasswords[buf].as<JsonObject>();
+	memset(&servicesList[0], 0, sizeof(servicesList));
+	for (JsonPair kv : services){
+		Serial.printf("Key: %s\n", kv.key().c_str());
+		strcat(servicesList, kv.key().c_str());
+		strcat(servicesList, "\n");
+	}
+	if (strlen(servicesList) >= 1){
+		servicesList[strlen(servicesList) - 1] = '\0';
+		lv_dropdown_set_options(selectServiceDD, servicesList);
+	}
+	
+	// readedPasswords[buf]
+	Serial.printf("New category: %s", buf);
+    
+}
+
+static void getPasswordsHandler(lv_event_t * event) {
+	char currCategory[32], currService[32];
+	lv_dropdown_get_selected_str(selectCategoryDD, currCategory, sizeof(currCategory));
+	lv_dropdown_get_selected_str(selectServiceDD, currService, sizeof(currService));
+
+	JsonArray keyArray = readedPasswords[currCategory][currService];
+
+    for (JsonArray arr : keyArray) {
+        Serial.printf("Login: %s\n", arr[0].as<const char*>());
+		Serial.printf("Password: %s\n\n", arr[1].as<const char*>());
+
+    }
+
+
+	// for (JsonObject elem : doc[currCategory][currService].as<JsonArray>()) {
+	// 	// Serial.printf("%s\n", elem[0].c_str());
+	// }
+
 }
 
 void getPasswordScreenLayout()
@@ -92,16 +165,14 @@ void getPasswordScreenLayout()
 	lv_obj_set_style_text_align(text_label, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_align(text_label, LV_ALIGN_CENTER, 0, -90);
 
-	lv_obj_t *selectCategoryDD = lv_dropdown_create(getPasswordScreen);
-	lv_dropdown_set_options(selectCategoryDD, "web\n"
-											  "ssh\n");
+	selectCategoryDD = lv_dropdown_create(getPasswordScreen);
+	lv_dropdown_set_options(selectCategoryDD, categoriesList);
 
 	lv_obj_align(selectCategoryDD, LV_ALIGN_LEFT_MID, 0, 0);
-	// lv_obj_add_event_cb(selectCategoryDD, event_handler, LV_EVENT_ALL, NULL);
+	lv_obj_add_event_cb(selectCategoryDD, categorySelectHandler, LV_EVENT_VALUE_CHANGED, NULL);
 
-	lv_obj_t *selectServiceDD = lv_dropdown_create(getPasswordScreen);
-	lv_dropdown_set_options(selectServiceDD, "gmail\n"
-											 "protonmail\n");
+	selectServiceDD = lv_dropdown_create(getPasswordScreen);
+	lv_dropdown_set_options(selectServiceDD, servicesList);
 
 	lv_obj_align(selectServiceDD, LV_ALIGN_RIGHT_MID, 0, 0);
 	// lv_obj_add_event_cb(selectServiceDD, event_handler, LV_EVENT_ALL, NULL);
@@ -109,7 +180,7 @@ void getPasswordScreenLayout()
 	lv_obj_t *getBtnLabel;
 
 	lv_obj_t *getServicePasswords = lv_btn_create(getPasswordScreen);
-	// lv_obj_add_event_cb(getServicePasswords, event_handler, LV_EVENT_ALL, NULL);
+	lv_obj_add_event_cb(getServicePasswords, getPasswordsHandler, LV_EVENT_CLICKED, NULL);
 	lv_obj_align(getServicePasswords, LV_ALIGN_BOTTOM_MID, 0, -40); // LV_ALIGN_BOTTOM_MID
 
 	getBtnLabel = lv_label_create(getServicePasswords);
@@ -121,14 +192,35 @@ void setup()
 {
 	Serial.begin(115200);
 
-	// SD Card
+	// SPIFS Card
 
-	if (!SD.begin(true))
-	{
-		Serial.prinf("SPIFFS Mount Failed\n");
-		while (1) {} // oh no, we loose all data....
+	if (!SPIFFS.begin(true)){
+		Serial.printf("Error in SD card init\n");
+		while (1){}
+	} else {
+		Serial.printf("SPIFS ready\n");
+		// uint8_t cardType = SD.cardType();
+		// uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+		// Serial.printf("SD card init OK!\nCard info:\nSize: %lluMB\nCard type: %d\n", cardSize, cardType);
 	}
-	else Serial.printf("SPIFS init OK\n");
+
+	// Check if passwords file exists, otherwise create new with default structure
+
+
+	File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
+	if (newFile.print("{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n")) Serial.printf("Passwords file create OK");
+	newFile.close();
+
+	// File file = SPIFFS.open(PASSWORDS_FILE_PATH);
+	// if (!file) {
+	// 	file.close();
+	// 	File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
+	// 	if (newFile.print("{\"web\": {}}\n")) Serial.printf("Passwords file create OK");
+	// 	newFile.close();
+
+	// }
+	// file.close();
+	
 
 	// Touch screen
 
@@ -180,7 +272,7 @@ void setup()
 
 	lv_keyboard_set_textarea(kb, passwordTa);
 
-	Serial.println("Setup done");
+	Serial.printf("Setup done");
 }
 
 void loop()
