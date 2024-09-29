@@ -47,6 +47,7 @@ lv_obj_t *selectServiceDD;
 lv_obj_t *selectCategoryDD;
 lv_obj_t *passwordsShowTable;
 
+
 /*Read the touchpad*/
 void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
@@ -193,16 +194,30 @@ void getPasswordScreenLayout()
 }
 
 
+void backToPasswordsSelect(lv_event_t * event){
+	lv_scr_load(getPasswordScreen);
+}
+
 void showPasswordsScreenLayout(){
-	// lv_obj_t * label = lv_label_create(showPasswordScreen);
-    // lv_label_set_text_fmt(label, "Passwords");
-    // lv_obj_align(label, LV_ALIGN_TOP_MID, 0, -10);
 
 	passwordsShowTable = lv_table_create(showPasswordScreen);
 	lv_table_set_cell_value(passwordsShowTable, 0, 0, "Login");
 	lv_table_set_cell_value(passwordsShowTable, 0, 1, "Passwords");
 	lv_obj_center(passwordsShowTable);
 
+
+	lv_obj_t *backBtnLabel;
+
+	lv_obj_t *backBtn = lv_btn_create(showPasswordScreen);
+	lv_obj_add_event_cb(backBtn, backToPasswordsSelect, LV_EVENT_CLICKED, NULL);
+	lv_obj_align(backBtn, LV_ALIGN_TOP_LEFT, 10, 10);
+	// lv_obj_set_pos(backBtn, 5, 5);
+
+	backBtnLabel = lv_label_create(backBtn);
+	lv_label_set_text(backBtnLabel, "Back");
+
+
+	
 }
 
 void setup()
@@ -216,17 +231,14 @@ void setup()
 		while (1){}
 	} else {
 		Serial.printf("SPIFS ready\n");
-		// uint8_t cardType = SD.cardType();
-		// uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-		// Serial.printf("SD card init OK!\nCard info:\nSize: %lluMB\nCard type: %d\n", cardSize, cardType);
 	}
 
 	// Check if passwords file exists, otherwise create new with default structure
 
 
-	File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-	if (newFile.print("{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n")) Serial.printf("Passwords file create OK");
-	newFile.close();
+	// File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
+	// if (newFile.print("{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n")) Serial.printf("Passwords file create OK");
+	// newFile.close();
 
 	// File file = SPIFFS.open(PASSWORDS_FILE_PATH);
 	// if (!file) {
