@@ -19,6 +19,8 @@
 // Some config
 #define PASSWORDS_FILE_PATH "/passwords.crypt"
 #define MAINTANCE_MODE // For dump/write passwords on device via PC (maybe for increasing security you need to disable this feature)
+#define DEV_AUTO_AUTH // Remove on prod build
+// #define INSECURE_MAINTANCE_ENABLE // 
 
 SPIClass touchscreenSpi = SPIClass(VSPI);
 Cipher *cipher = new Cipher();
@@ -45,6 +47,7 @@ char servicesList[1024];
 // Screens
 lv_obj_t *getPasswordScreen;
 lv_obj_t *showPasswordScreen;
+lv_obj_t *addPasswordScreen;
 
 #ifdef MAINTANCE_MODE
 lv_obj_t *maintanceScreen;
@@ -85,6 +88,9 @@ uint32_t lastTick = 0;
 static void my_keyboard_event_cb(lv_event_t *e)
 {
 	const char *password = lv_textarea_get_text(passwordTa);
+	#ifdef DEV_AUTO_AUTH
+	password = "0123456789012345";
+	#endif
 	cipher->setKey((char *)password);
 
 	// Load passswords{
@@ -93,9 +99,7 @@ static void my_keyboard_event_cb(lv_event_t *e)
 	if (!file)
 	{
 		Serial.printf("Fatal error; Can't read file\n");
-		while (1)
-		{
-		}
+		while (1) {}
 	}
 
 	if (file.available())
@@ -109,7 +113,6 @@ static void my_keyboard_event_cb(lv_event_t *e)
 		if (!err)
 		{
 			// Iterate over categories
-
 			JsonObject root = readedPasswords.as<JsonObject>();
 			uint8_t index = 0;
 
@@ -119,8 +122,6 @@ static void my_keyboard_event_cb(lv_event_t *e)
 				strcat(categoriesList, "\n");
 			}
 			categoriesList[strlen(categoriesList) - 1] = '\0';
-
-			// printf("Categories: %s", categoriesList);
 
 			// Load UI
 			getPasswordScreenLayout();
@@ -198,7 +199,6 @@ void getPasswordScreenLayout()
 	// lv_obj_add_event_cb(selectServiceDD, event_handler, LV_EVENT_ALL, NULL);
 
 	lv_obj_t *getBtnLabel;
-
 	lv_obj_t *getServicePasswords = lv_btn_create(getPasswordScreen);
 	lv_obj_add_event_cb(getServicePasswords, getPasswordsHandler, LV_EVENT_CLICKED, NULL);
 	lv_obj_align(getServicePasswords, LV_ALIGN_BOTTOM_MID, 0, -40); // LV_ALIGN_BOTTOM_MID
@@ -206,6 +206,23 @@ void getPasswordScreenLayout()
 	getBtnLabel = lv_label_create(getServicePasswords);
 	lv_label_set_text(getBtnLabel, "Get");
 	lv_obj_center(getServicePasswords);
+
+
+	lv_obj_t *addPassLabel;
+	lv_obj_t *addCategoryLabel;
+
+	lv_obj_t *addPassBtn = lv_btn_create(getPasswordScreen);
+	// lv_obj_add_event_cb(gaddPassBtn, getPasswordsHandler, LV_EVENT_CLICKED, NULL);
+	lv_obj_align(addPassBtn, LV_ALIGN_BOTTOM_LEFT, 10, -10); // LV_ALIGN_BOTTOM_MID
+	addPassLabel = lv_label_create(addPassBtn);
+	lv_label_set_text(addPassLabel, "Add pass");
+
+
+	lv_obj_t *addCategoryBtn = lv_btn_create(getPasswordScreen);
+	// lv_obj_add_event_cb(gaddPassBtn, getPasswordsHandler, LV_EVENT_CLICKED, NULL);
+	lv_obj_align(addCategoryBtn, LV_ALIGN_BOTTOM_RIGHT, -610, -10);
+	addCategoryLabel = lv_label_create(addCategoryBtn);
+	lv_label_set_text(addCategoryLabel, "Add category");
 }
 
 void backToPasswordsSelect(lv_event_t *event)
@@ -232,6 +249,7 @@ void showPasswordsScreenLayout()
 	lv_label_set_text(backBtnLabel, "Back");
 }
 
+
 #ifdef MAINTANCE_MODE
 void maintanceScreenLayout()
 {
@@ -246,15 +264,14 @@ void maintanceScreenLayout()
 void setup()
 {
 	Serial.begin(115200);
+	Serial.setTimeout(500);
 
 	// SPIFS Card
 
 	if (!SPIFFS.begin(true))
 	{
 		Serial.printf("Error in SD card init\n");
-		while (1)
-		{
-		}
+		while (1) {}
 	}
 	else
 	{
@@ -372,11 +389,40 @@ void loop()
 		}
 		else if (13 <= strlen(serialBuffer) && (strncmp("internal_dump", serialBuffer, 13) == 0))
 		{
-			serializeJson(readedPasswords, Serial);
+			// TODO; require device unlock
+			// You can't dump decrypted passwords via API; You can only dump raw file contents
+			File file = SPIFFS.open(PASSWORDS_FILE_PATH);
+			if (file){
+				String fileContent = "";
+				while (file.available()) fileContent += (char)file.read();
+				file.close(); 
+				Serial.println(fileContent);
+			} else Serial.printf("No file\n");
+			
 		}
 		else if (13 <= strlen(serialBuffer) && (strncmp("fs_clear_init", serialBuffer, 13) == 0))
 		{
-			// serializeJson(readedPasswords, Serial);
+			// Clear pass file and create new; encrypted with given pass
+		}
+		else if (8 <= strlen(serialBuffer) && (strncmp("add_pass", serialBuffer, 8) == 0)){
+			// You need to load passwords (unlock device)
+			// Only then you can switch to maintance mode and add passwords
+			// TODO Add password checking
+
+			delay(1000);
+			String jsonInput = Serial.readStringUntil('\n');
+			JsonDocument readedCommand;
+			DeserializationError err = deserializeJson(readedPasswords, jsonInput);
+			if (!err){
+				if (!readedPasswords.isNull()){
+					for (JsonArray arr : keyArray)
+					{
+						lv_table_set_cell_value(passwordsShowTable, countRows, 0, arr[0].as<const char *>()); // Login
+						lv_table_set_cell_value(passwordsShowTable, countRows, 1, arr[1].as<const char *>()); // Password
+						countRows++;
+					}					
+				}
+			}
 		}
 	}
 #endif
