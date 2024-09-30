@@ -37,8 +37,8 @@ This is python client (for cross-platfrom) to upload new passwords and make sync
 ### Passwords add json
 ```json
 [  
-    {"category": "web", "service": "gmail", "login": "email@email.ru", "password": "hello_world"},
-    {"category": "web", "service": "gmail", "login": "email@email.ru", "password": "hello_world"}
+    {"category": "web", "service": "yandex", "login": "email1@ya.ru", "password": "hello1"},
+    {"category": "web", "service": "yandex", "login": "email2@ya.ru", "password": "hello2"}
 ]
 ```
 
