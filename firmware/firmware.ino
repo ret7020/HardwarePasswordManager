@@ -407,7 +407,17 @@ void loop()
 		}
 		else if (13 <= strlen(serialBuffer) && (strncmp("fs_clear_init", serialBuffer, 13) == 0))
 		{
-			// Clear pass file and create new; encrypted with given pass
+			// TODO not static password
+
+			char* key = "0123456789012345";
+			cipher->setKey(key);
+
+			String data = "{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n";
+			String cipherString = cipher->encryptString(data);
+
+			File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
+			if (newFile.print(cipherString)) Serial.printf("Passwords file create OK");
+			newFile.close();
 		}
 		else if (8 <= strlen(serialBuffer) && (strncmp("add_pass", serialBuffer, 8) == 0))
 		{
@@ -428,28 +438,24 @@ void loop()
 					serializeJson(readedCommand, Serial);
 					for (JsonObject value : arr)
 					{
-						// StaticJsonDocument<JSON_ARRAY_SIZE(2)> doc;
-						// JsonArray loginPassArray = doc.to<JsonArray>();
-						// loginPassArray.add(value["login"]);
-						// loginPassArray.add(value["password"]);
-						// serializeJson(loginPassArray, Serial);
-						// Serial.println();
-						// readedPasswords[value["category"]][value["service"]].add(loginPassArray);
 						const char* categoryName = value["category"];
 						const char* serviceName = value["service"];
-						
-						JsonArray serviceArray = readedPasswords[categoryName][serviceName];
-						JsonArray newEntry = serviceArray.createNestedArray();
-						newEntry.add(value["login"]);
-						newEntry.add(value["password"]);
-						// serializeJson(serviceArray, Serial);
-						// Service already exists
-						// if (readedPasswords[value["category"]].containsKey([values["service"]])){
-						// 	readedPasswords[value["category"]][values["service"]].add(loginPassArray);
-						// } else {
-						// 	readedPasswords[value["category"]][values["service"]].add(loginPassArray);
-						// }
-						// Serial.printf("%s\n", value["category"].as<const char*>());
+
+						// Service exists
+						if (!readedPasswords[categoryName].containsKey(serviceName)) 
+						{
+							StaticJsonDocument<200> doc;
+							JsonArray array = doc.to<JsonArray>();
+							JsonArray nested = array.createNestedArray();
+							nested.add(value["login"]);
+							nested.add(value["password"]);
+							readedPasswords[categoryName][serviceName] = array;
+						}else { // Service exists
+							JsonArray serviceArray = readedPasswords[categoryName][serviceName];
+							JsonArray newEntry = serviceArray.createNestedArray();
+							newEntry.add(value["login"]);
+							newEntry.add(value["password"]);
+						}
 					}
 					serializeJson(readedPasswords, Serial);
 					const char* key = readedCommand["master_key"];
