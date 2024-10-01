@@ -20,6 +20,11 @@
 #define PASSWORDS_FILE_PATH "/passwords.crypt"
 #define MAINTANCE_MODE // For dump/write passwords on device via PC (maybe for increasing security you need to disable this feature)
 #define DEV_AUTO_AUTH  // Remove on prod build
+#define SECURE_NOTES   // External file with same encryption as passwords for storing text info // TODO implement
+#ifdef SECURE_NOTES
+#define SECURE_NOTES_FILE_PATH "/notes.crypt"
+#endif
+
 // #define INSECURE_MAINTANCE_ENABLE //
 
 SPIClass touchscreenSpi = SPIClass(VSPI);
@@ -39,7 +44,14 @@ void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 }
 
 lv_obj_t *passwordTa;
+#ifdef SECURE_NOTES
+lv_obj_t *notesTa;
+#endif
 DynamicJsonDocument readedPasswords(2048);
+
+#ifdef SECURE_NOTES
+String readedSecureNotes;
+#endif
 
 char categoriesList[256];
 char servicesList[1024];
@@ -48,6 +60,9 @@ char servicesList[1024];
 lv_obj_t *getPasswordScreen;
 lv_obj_t *showPasswordScreen;
 lv_obj_t *addPasswordScreen;
+#ifdef SECURE_NOTES
+lv_obj_t *notesScreen;
+#endif
 
 #ifdef MAINTANCE_MODE
 lv_obj_t *maintanceScreen;
@@ -85,7 +100,7 @@ lv_indev_t *indev;
 uint8_t *draw_buf;
 uint32_t lastTick = 0;
 
-static void my_keyboard_event_cb(lv_event_t *e)
+static void deviceUnlock(lv_event_t *e) // Device unlock
 {
 	const char *password = lv_textarea_get_text(passwordTa);
 #ifdef DEV_AUTO_AUTH
@@ -93,7 +108,7 @@ static void my_keyboard_event_cb(lv_event_t *e)
 #endif
 	cipher->setKey((char *)password);
 
-	// Load passswords{
+	// Load passswords
 	File file = SPIFFS.open(PASSWORDS_FILE_PATH);
 
 	if (!file)
@@ -133,7 +148,24 @@ static void my_keyboard_event_cb(lv_event_t *e)
 	}
 	else
 		file.close();
+	
 }
+
+#ifdef SECURE_NOTES
+static void readSecureNotes(){	
+
+	File file = SPIFFS.open(SECURE_NOTES_FILE_PATH);
+	if (file.available())
+	{
+		String fileContent = "";
+		while (file.available())
+			fileContent += (char)file.read();
+		file.close();
+		readedSecureNotes = cipher->decryptString(fileContent);
+		lv_textarea_set_text(notesTa, readedSecureNotes.c_str());
+	}
+}
+#endif
 
 static void categorySelectHandler(lv_event_t *e)
 {
@@ -212,6 +244,7 @@ void getPasswordScreenLayout()
 
 	lv_obj_t *addPassLabel;
 	lv_obj_t *addCategoryLabel;
+	lv_obj_t *openNotesLabel;
 
 	lv_obj_t *addPassBtn = lv_btn_create(getPasswordScreen);
 	// lv_obj_add_event_cb(gaddPassBtn, getPasswordsHandler, LV_EVENT_CLICKED, NULL);
@@ -224,12 +257,45 @@ void getPasswordScreenLayout()
 	lv_obj_align(addCategoryBtn, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
 	addCategoryLabel = lv_label_create(addCategoryBtn);
 	lv_label_set_text(addCategoryLabel, "Add category");
+
+#ifdef SECURE_NOTES
+	lv_obj_t *openNotesBtn = lv_btn_create(getPasswordScreen);
+	lv_obj_add_event_cb(openNotesBtn, openNotesScreen, LV_EVENT_CLICKED, NULL);
+	lv_obj_align(openNotesBtn, LV_ALIGN_BOTTOM_MID, -15, -10);
+	openNotesLabel = lv_label_create(openNotesBtn);
+	lv_label_set_text(openNotesLabel, "Notes");
+#endif
 }
+
+#ifdef SECURE_NOTES
+void notesScreenLayout()
+{
+	notesTa = lv_textarea_create(notesScreen);
+	lv_obj_align(notesTa, LV_ALIGN_TOP_MID, 0, 50);
+	lv_obj_set_size(notesTa, lv_pct(90), lv_pct(70));
+	lv_obj_add_state(notesTa, LV_STATE_FOCUSED);
+
+	lv_obj_t *backBtnLabel;
+	lv_obj_t *backBtn = lv_btn_create(notesScreen);
+	lv_obj_add_event_cb(backBtn, backToPasswordsSelect, LV_EVENT_CLICKED, NULL);
+	lv_obj_align(backBtn, LV_ALIGN_TOP_LEFT, 10, 10);
+	backBtnLabel = lv_label_create(backBtn);
+	lv_label_set_text(backBtnLabel, "Back");
+}
+#endif
 
 void backToPasswordsSelect(lv_event_t *event)
 {
 	lv_scr_load(getPasswordScreen);
 }
+
+#ifdef SECURE_NOTES
+void openNotesScreen(lv_event_t *event)
+{
+	readSecureNotes();
+	lv_scr_load(notesScreen);
+}
+#endif
 
 void showPasswordsScreenLayout()
 {
@@ -276,31 +342,7 @@ void setup()
 		}
 	}
 	else
-	{
 		Serial.printf("SPIFS ready\n");
-	}
-
-	// Check if passwords file exists, otherwise create new with default structure
-
-	// char* key = "0123456789012345";
-	// cipher->setKey(key);
-
-	// String data = "{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n";
-	// String cipherString = cipher->encryptString(data);
-
-	// File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-	// if (newFile.print(cipherString)) Serial.printf("Passwords file create OK");
-	// newFile.close();
-
-	// File file = SPIFFS.open(PASSWORDS_FILE_PATH);
-	// if (!file) {
-	// 	file.close();
-	// 	File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-	// 	if (newFile.print("{\"web\": {}}\n")) Serial.printf("Passwords file create OK");
-	// 	newFile.close();
-
-	// }
-	// file.close();
 
 	// Touch screen
 
@@ -324,6 +366,9 @@ void setup()
 	// Create screens
 	getPasswordScreen = lv_obj_create(NULL);
 	showPasswordScreen = lv_obj_create(NULL);
+#ifdef SECURE_NOTES
+	notesScreen = lv_obj_create(NULL);
+#endif
 
 #ifdef MAINTANCE_MODE
 	maintanceScreen = lv_obj_create(NULL);
@@ -346,7 +391,7 @@ void setup()
 
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_1, kb_map, kb_ctrl);
 	lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_USER_1);
-	lv_obj_add_event_cb(kb, my_keyboard_event_cb, LV_EVENT_READY, kb);
+	lv_obj_add_event_cb(kb, deviceUnlock, LV_EVENT_READY, kb);
 
 	passwordTa = lv_textarea_create(lv_screen_active());
 	lv_obj_align(passwordTa, LV_ALIGN_TOP_MID, 0, 50);
@@ -357,6 +402,9 @@ void setup()
 
 	lv_keyboard_set_textarea(kb, passwordTa);
 	showPasswordsScreenLayout();
+#ifdef SECURE_NOTES
+	notesScreenLayout();
+#endif
 
 #ifdef MAINTANCE_MODE
 	maintanceScreenLayout();
@@ -409,14 +457,15 @@ void loop()
 		{
 			// TODO not static password
 
-			char* key = "0123456789012345";
+			char *key = "0123456789012345";
 			cipher->setKey(key);
 
 			String data = "{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n";
 			String cipherString = cipher->encryptString(data);
 
 			File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-			if (newFile.print(cipherString)) Serial.printf("Passwords file create OK");
+			if (newFile.print(cipherString))
+				Serial.printf("Passwords file create OK");
 			newFile.close();
 		}
 		else if (8 <= strlen(serialBuffer) && (strncmp("add_pass", serialBuffer, 8) == 0))
@@ -434,46 +483,116 @@ void loop()
 			{
 				// if (!readedPasswords.isNull()) // TODO Fix checking
 				// {
-					JsonArray arr = readedCommand["data"].as<JsonArray>();
-					serializeJson(readedCommand, Serial);
-					for (JsonObject value : arr)
+				JsonArray arr = readedCommand["data"].as<JsonArray>();
+				serializeJson(readedCommand, Serial);
+				for (JsonObject value : arr)
+				{
+					const char *categoryName = value["category"];
+					const char *serviceName = value["service"];
+
+					// Service exists
+					if (!readedPasswords[categoryName].containsKey(serviceName))
 					{
-						const char* categoryName = value["category"];
-						const char* serviceName = value["service"];
-
-						// Service exists
-						if (!readedPasswords[categoryName].containsKey(serviceName)) 
-						{
-							StaticJsonDocument<200> doc;
-							JsonArray array = doc.to<JsonArray>();
-							JsonArray nested = array.createNestedArray();
-							nested.add(value["login"]);
-							nested.add(value["password"]);
-							readedPasswords[categoryName][serviceName] = array;
-						}else { // Service exists
-							JsonArray serviceArray = readedPasswords[categoryName][serviceName];
-							JsonArray newEntry = serviceArray.createNestedArray();
-							newEntry.add(value["login"]);
-							newEntry.add(value["password"]);
-						}
+						StaticJsonDocument<200> doc;
+						JsonArray array = doc.to<JsonArray>();
+						JsonArray nested = array.createNestedArray();
+						nested.add(value["login"]);
+						nested.add(value["password"]);
+						readedPasswords[categoryName][serviceName] = array;
 					}
-					serializeJson(readedPasswords, Serial);
-					const char* key = readedCommand["master_key"];
-					cipher->setKey((char*)key);
+					else
+					{ // Service exists
+						JsonArray serviceArray = readedPasswords[categoryName][serviceName];
+						JsonArray newEntry = serviceArray.createNestedArray();
+						newEntry.add(value["login"]);
+						newEntry.add(value["password"]);
+					}
+				}
+				serializeJson(readedPasswords, Serial);
+				const char *key = readedCommand["master_key"];
+				cipher->setKey((char *)key);
 
-					String passwordsString;
-					serializeJson(readedPasswords, passwordsString);
-					Serial.printf("%s", passwordsString);
+				String passwordsString;
+				serializeJson(readedPasswords, passwordsString);
+				Serial.printf("%s", passwordsString);
 
-					String cipherString = cipher->encryptString(passwordsString);
+				String cipherString = cipher->encryptString(passwordsString);
 
-					File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-					if (newFile.print(cipherString)) Serial.printf("Passwords file create OK");
-					newFile.close();
+				File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
+				if (newFile.print(cipherString))
+					Serial.printf("Passwords file create OK");
+				newFile.close();
 
 				// }
 			}
 		}
+#ifdef SECURE_NOTES
+		else if (11 <= strlen(serialBuffer) && (strncmp("write_notes", serialBuffer, 11) == 0))
+		{
+			// Command struct
+			// {"master_key": key, "content": "some"}
+			if (!readedPasswords.isNull())
+			{ // If device unlocked
+				Serial.flush();
+				Serial.printf("Enter command\n");
+				String jsonInput = Serial.readStringUntil('\n');
+				JsonDocument readedCommand;
+				DeserializationError err = deserializeJson(readedCommand, jsonInput);
+				if (!err)
+				{
+					// Set cipher key
+					const char *key = readedCommand["master_key"];
+					cipher->setKey((char *)key);
+
+					// Crypt
+					String notesString = readedCommand["content"];
+					Serial.println(notesString);
+					String cipherString = cipher->encryptString(notesString);
+
+					// Write
+					File newFile = SPIFFS.open(SECURE_NOTES_FILE_PATH, FILE_WRITE);
+					if (newFile.print(cipherString))
+						Serial.printf("Notes write OK");
+					newFile.close();
+				}
+			}
+			else
+				Serial.printf("Unlock device...");
+			Serial.flush();
+		}
+		else if (10 <= strlen(serialBuffer) && (strncmp("read_notes", serialBuffer, 10) == 0))
+		{
+			if (!readedPasswords.isNull())
+			{
+				Serial.flush();
+				Serial.printf("Enter master key\n");
+
+				// Set key
+				String jsonInput = Serial.readStringUntil('\n');
+				JsonDocument readedCommand;
+				DeserializationError err = deserializeJson(readedCommand, jsonInput);
+				if (!err)
+				{
+					const char *key = readedCommand["master_key"];
+					cipher->setKey((char *)key);
+
+					// Decrypt
+					File file = SPIFFS.open(SECURE_NOTES_FILE_PATH);
+					if (file)
+					{
+						String fileContent = "";
+						while (file.available())
+							fileContent += (char)file.read();
+						file.close();
+						String decipheredString = cipher->decryptString(fileContent);
+						Serial.println(decipheredString);
+					}
+				}
+			} else
+				Serial.printf("Unlock device...");
+		}
+
+#endif // SECEURE_NOTES
 	}
 #endif
 }
