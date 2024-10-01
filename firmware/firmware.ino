@@ -455,18 +455,25 @@ void loop()
 		}
 		else if (13 <= strlen(serialBuffer) && (strncmp("fs_clear_init", serialBuffer, 13) == 0))
 		{
-			// TODO not static password
+			Serial.flush();
+			Serial.printf("Enter command\n");
+			String jsonInput = Serial.readStringUntil('\n');
+			Serial.println(jsonInput);
+			JsonDocument readedCommand;
+			DeserializationError err = deserializeJson(readedCommand, jsonInput);
+			if (!err)
+			{
+				const char *key = readedCommand["master_key"];
+				cipher->setKey(key);
 
-			char *key = "0123456789012345";
-			cipher->setKey(key);
+				String data = "{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n";
+				String cipherString = cipher->encryptString(data);
 
-			String data = "{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n";
-			String cipherString = cipher->encryptString(data);
-
-			File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-			if (newFile.print(cipherString))
-				Serial.printf("Passwords file create OK");
-			newFile.close();
+				File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
+				if (newFile.print(cipherString))
+					Serial.printf("Passwords file create OK");
+				newFile.close();
+			}
 		}
 		else if (8 <= strlen(serialBuffer) && (strncmp("add_pass", serialBuffer, 8) == 0))
 		{
@@ -481,8 +488,8 @@ void loop()
 			DeserializationError err = deserializeJson(readedCommand, jsonInput);
 			if (!err)
 			{
-				// if (!readedPasswords.isNull()) // TODO Fix checking
-				// {
+				if (!readedPasswords.isNull()) // TODO Fix checking
+				{
 				JsonArray arr = readedCommand["data"].as<JsonArray>();
 				serializeJson(readedCommand, Serial);
 				for (JsonObject value : arr)
@@ -523,7 +530,7 @@ void loop()
 					Serial.printf("Passwords file create OK");
 				newFile.close();
 
-				// }
+				}
 			}
 		}
 #ifdef SECURE_NOTES

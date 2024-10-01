@@ -61,7 +61,7 @@ Commands:
 | set_maintance  | Disable GUI on display | NO | - |
 | sf_reboot | Reboot device via abort(); used to quit maintance_mode | NO | - |
 | internal_dump | Writes on UART dump from stored passwords file (not decrypted) | Unlock + Master-key via UART call | - |
-| fs_clear_init | NOT IMPLEMENTED - clear passwords file and base struct (see above) crypted with given password, used for first time setup| NO | - |
+| fs_clear_init | Clear passwords file and base struct (see above) crypted with given password, used for first time setup| NO | - |
 | add_pass | Bulk add passwords to device via json | Unlock + Master-key via UART call | Master-key && passwords in serialized json |
 
 
@@ -70,10 +70,16 @@ If command doesn't require arguments you have just to send command over UART and
 General descriptions
 
 ```
-SEND_COMMAND -> WAIT 50 ms -> DEVICE waits 1 second - in this time you have to transmit command arguments ending with `\n` -> read output
+SEND_COMMAND -> WAIT UNTIL DEVICE ANSWER WITH COMMAND ARGS REQUEST -> SEND COMMAND ARGS -> read output
 ```
 
-Example
+Example with adding passwords (PC - ypur computer; PMD - password manager device):
+```
+PC: add_pass
+PMD: Enter command\n
+PC: {"data": [{"category": "web", "service": "gmail", "login": "1", "password": "2"}], "master_key": "1234"}
+PMD: Passwords file create OK
+```
 
 
 
