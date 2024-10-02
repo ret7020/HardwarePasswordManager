@@ -9,16 +9,21 @@ parser.add_argument('--speed', type=int, default=115200, nargs='?', const=115200
 parser.add_argument('--command', type=str)
 # parser.add_argument('--master_key', type=str, nargs='?') # Can be saved in *sh history, so only stdin input
 parser.add_argument('--pass_file', type=str, nargs='?')
+parser.add_argument('--bypass_checks', type=int, nargs='?', default=0, const=0)
 args = parser.parse_args()
 
 
-input("Highly recomend to unlock device if it is locked. Press Enter")
+if not args.bypass_checks:
+    input("Highly recomend to unlock device if it is locked. Press Enter")
 
 serial = serial.Serial(args.dev, args.speed)
-time.sleep(0.5)
-serial.write(b"set_maintance")
-time.sleep(0.5)
-maintance_mode_ok = input("Device in maintance mode? (y/n)")
+time.sleep(0.1)
+if not args.bypass_checks:
+    serial.write(b"set_maintance")
+    time.sleep(0.5)
+    maintance_mode_ok = input("Device in maintance mode? (y/n)")
+else: maintance_mode_ok = 'y'
+
 if maintance_mode_ok == 'y':
     if args.command == "add_pass":
         with open(args.pass_file) as fd:
@@ -45,5 +50,16 @@ if maintance_mode_ok == 'y':
             print(serial.read().decode("utf-8"))
 
         print()
+    
+    elif args.command == "get_curr_value":
+        serial.write(b"get_curr_value")
+        time.sleep(0.2)
+        res = ""
+        while serial.in_waiting > 0:
+            res += serial.read(serial.in_waiting).decode("utf-8")
+        res = res[:-1]
+        if res: print(res)
+        else: print("N/A")
 
-    serial.write(b"sf_reboot")
+    if not args.bypass_checks:
+        serial.write(b"sf_reboot")

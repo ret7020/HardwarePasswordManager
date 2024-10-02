@@ -25,6 +25,8 @@
 #define SECURE_NOTES_FILE_PATH "/notes.crypt"
 #endif
 
+#define COPY_TO_PC // copy password or login to pc
+
 // #define INSECURE_MAINTANCE_ENABLE //
 
 SPIClass touchscreenSpi = SPIClass(VSPI);
@@ -55,6 +57,10 @@ String readedSecureNotes;
 
 char categoriesList[256];
 char servicesList[1024];
+
+#ifdef COPY_TO_PC
+char shareValue[1024];
+#endif
 
 // Screens
 lv_obj_t *getPasswordScreen;
@@ -287,6 +293,7 @@ void notesScreenLayout()
 void backToPasswordsSelect(lv_event_t *event)
 {
 	lv_scr_load(getPasswordScreen);
+	memset(&shareValue[0], 0, sizeof(shareValue));
 }
 
 #ifdef SECURE_NOTES
@@ -297,6 +304,19 @@ void openNotesScreen(lv_event_t *event)
 }
 #endif
 
+
+#ifdef COPY_TO_PC
+void table_event_handler(lv_event_t * e)
+{   
+	lv_obj_t * obj = (lv_obj_t *) lv_event_get_target(e);
+	uint32_t col;
+	uint32_t row;
+	lv_table_get_selected_cell(obj, &row, &col);
+	const char * valuePtr = lv_table_get_cell_value(obj, row, col);
+	strcpy(shareValue, valuePtr);
+}
+#endif // COPY_TO_PC
+
 void showPasswordsScreenLayout()
 {
 
@@ -304,6 +324,9 @@ void showPasswordsScreenLayout()
 	lv_table_set_cell_value(passwordsShowTable, 0, 0, "Login");
 	lv_table_set_cell_value(passwordsShowTable, 0, 1, "Passwords");
 	lv_obj_center(passwordsShowTable);
+	#ifdef COPY_TO_PC
+	lv_obj_add_event_cb(passwordsShowTable, table_event_handler, LV_EVENT_LONG_PRESSED, NULL);
+	#endif
 
 	lv_obj_t *backBtnLabel;
 
@@ -419,7 +442,6 @@ void loop()
 	lastTick = millis();
 	lv_timer_handler();
 	delay(5);
-#ifdef MAINTANCE_MODE
 	if (Serial.available() > 3)
 	{
 		char serialBuffer[64];
@@ -429,6 +451,8 @@ void loop()
 			serialBuffer[byteNum] = Serial.read();
 			byteNum++;
 		}
+
+		#ifdef MAINTANCE_MODE
 		if (13 <= strlen(serialBuffer) && (strncmp("set_maintance", serialBuffer, 13) == 0))
 		{
 			lv_scr_load(maintanceScreen);
@@ -464,7 +488,7 @@ void loop()
 			if (!err)
 			{
 				const char *key = readedCommand["master_key"];
-				cipher->setKey(key);
+				cipher->setKey((char *)key);
 
 				String data = "{\"web\": {\"gmail\": [[\"login\", \"password\"], [\"login2\", \"password2\"]]}}\n";
 				String cipherString = cipher->encryptString(data);
@@ -533,7 +557,8 @@ void loop()
 				}
 			}
 		}
-#ifdef SECURE_NOTES
+		#endif // MAINTANCE_MODE
+		#ifdef SECURE_NOTES
 		else if (11 <= strlen(serialBuffer) && (strncmp("write_notes", serialBuffer, 11) == 0))
 		{
 			// Command struct
@@ -598,8 +623,21 @@ void loop()
 			} else
 				Serial.printf("Unlock device...");
 		}
+		#endif // SECEURE_NOTES
 
-#endif // SECEURE_NOTES
+		#ifdef COPY_TO_PC
+		else if (14 <= strlen(serialBuffer) && (strncmp("get_curr_value", serialBuffer, 14) == 0))
+		{
+			if (!readedPasswords.isNull())
+			{
+				Serial.printf("%s\n", shareValue);
+			}
+		
+		}
+
+
+		#endif COPY_TO_PC
+
+
 	}
-#endif
 }
