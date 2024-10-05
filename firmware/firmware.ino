@@ -1,11 +1,11 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
-#include <XPT2046_Touchscreen.h>
 #include "SPIFFS.h"
 #include "FS.h"
 #include "SPI.h"
 #include "SD.h"
 #include <ArduinoJson.h>
+#include <XPT2046_Bitbang.h>
 #include "Cipher.h"
 #include <string>
 
@@ -32,13 +32,15 @@
 SPIClass touchscreenSpi = SPIClass(VSPI);
 Cipher *cipher = new Cipher();
 
-XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
 uint16_t touchScreenMinimumX = 200, touchScreenMaximumX = 3700, touchScreenMinimumY = 240, touchScreenMaximumY = 3800;
+
+XPT2046_Bitbang ts(XPT2046_MOSI, XPT2046_MISO, XPT2046_CLK, XPT2046_CS);
 
 #define TFT_HOR_RES 320
 #define TFT_VER_RES 240
 
 #define DRAW_BUF_SIZE (TFT_HOR_RES * TFT_VER_RES / 10 * (LV_COLOR_DEPTH / 8))
+// uint32_t draw_buf[DRAW_BUF_SIZE / 4];
 
 void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
@@ -81,9 +83,11 @@ lv_obj_t *passwordsShowTable;
 /*Read the touchpad*/
 void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
-	if (touchscreen.touched())
+	Serial.println("Touch call");
+	TouchPoint p = ts.getTouch();
+	if (p.x != 0 || p.y != 0)
 	{
-		TS_Point p = touchscreen.getPoint();
+		
 		if (p.x < touchScreenMinimumX)
 			touchScreenMinimumX = p.x;
 		if (p.x > touchScreenMaximumX)
@@ -95,9 +99,8 @@ void my_touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 		data->point.x = map(p.x, touchScreenMinimumX, touchScreenMaximumX, 1, TFT_HOR_RES);
 		data->point.y = map(p.y, touchScreenMinimumY, touchScreenMaximumY, 1, TFT_VER_RES);
 		data->state = LV_INDEV_STATE_PRESSED;
-	}
-	else
-	{
+		Serial.printf("%d %d\n", data->point.x, data->point.y);
+	} else {
 		data->state = LV_INDEV_STATE_RELEASED;
 	}
 }
@@ -154,11 +157,11 @@ static void deviceUnlock(lv_event_t *e) // Device unlock
 	}
 	else
 		file.close();
-	
 }
 
 #ifdef SECURE_NOTES
-static void readSecureNotes(){	
+static void readSecureNotes()
+{
 
 	File file = SPIFFS.open(SECURE_NOTES_FILE_PATH);
 	if (file.available())
@@ -304,15 +307,14 @@ void openNotesScreen(lv_event_t *event)
 }
 #endif
 
-
 #ifdef COPY_TO_PC
-void table_event_handler(lv_event_t * e)
-{   
-	lv_obj_t * obj = (lv_obj_t *) lv_event_get_target(e);
+void table_event_handler(lv_event_t *e)
+{
+	lv_obj_t *obj = (lv_obj_t *)lv_event_get_target(e);
 	uint32_t col;
 	uint32_t row;
 	lv_table_get_selected_cell(obj, &row, &col);
-	const char * valuePtr = lv_table_get_cell_value(obj, row, col);
+	const char *valuePtr = lv_table_get_cell_value(obj, row, col);
 	strcpy(shareValue, valuePtr);
 }
 #endif // COPY_TO_PC
@@ -324,9 +326,9 @@ void showPasswordsScreenLayout()
 	lv_table_set_cell_value(passwordsShowTable, 0, 0, "Login");
 	lv_table_set_cell_value(passwordsShowTable, 0, 1, "Passwords");
 	lv_obj_center(passwordsShowTable);
-	#ifdef COPY_TO_PC
+#ifdef COPY_TO_PC
 	lv_obj_add_event_cb(passwordsShowTable, table_event_handler, LV_EVENT_LONG_PRESSED, NULL);
-	#endif
+#endif
 
 	lv_obj_t *backBtnLabel;
 
@@ -369,9 +371,10 @@ void setup()
 
 	// Touch screen
 
-	touchscreenSpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
-	touchscreen.begin(touchscreenSpi);
-	touchscreen.setRotation(3);
+	// touchscreenSpi.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+	// touchscreen.begin(touchscreenSpi);
+	// touchscreen.setRotation(3);
+	ts.begin();
 
 	// Lvgl
 
@@ -452,7 +455,7 @@ void loop()
 			byteNum++;
 		}
 
-		#ifdef MAINTANCE_MODE
+#ifdef MAINTANCE_MODE
 		if (13 <= strlen(serialBuffer) && (strncmp("set_maintance", serialBuffer, 13) == 0))
 		{
 			lv_scr_load(maintanceScreen);
@@ -514,51 +517,50 @@ void loop()
 			{
 				if (!readedPasswords.isNull()) // TODO Fix checking
 				{
-				JsonArray arr = readedCommand["data"].as<JsonArray>();
-				serializeJson(readedCommand, Serial);
-				for (JsonObject value : arr)
-				{
-					const char *categoryName = value["category"];
-					const char *serviceName = value["service"];
-
-					// Service exists
-					if (!readedPasswords[categoryName].containsKey(serviceName))
+					JsonArray arr = readedCommand["data"].as<JsonArray>();
+					serializeJson(readedCommand, Serial);
+					for (JsonObject value : arr)
 					{
-						StaticJsonDocument<200> doc;
-						JsonArray array = doc.to<JsonArray>();
-						JsonArray nested = array.createNestedArray();
-						nested.add(value["login"]);
-						nested.add(value["password"]);
-						readedPasswords[categoryName][serviceName] = array;
+						const char *categoryName = value["category"];
+						const char *serviceName = value["service"];
+
+						// Service exists
+						if (!readedPasswords[categoryName].containsKey(serviceName))
+						{
+							StaticJsonDocument<200> doc;
+							JsonArray array = doc.to<JsonArray>();
+							JsonArray nested = array.createNestedArray();
+							nested.add(value["login"]);
+							nested.add(value["password"]);
+							readedPasswords[categoryName][serviceName] = array;
+						}
+						else
+						{ // Service exists
+							JsonArray serviceArray = readedPasswords[categoryName][serviceName];
+							JsonArray newEntry = serviceArray.createNestedArray();
+							newEntry.add(value["login"]);
+							newEntry.add(value["password"]);
+						}
 					}
-					else
-					{ // Service exists
-						JsonArray serviceArray = readedPasswords[categoryName][serviceName];
-						JsonArray newEntry = serviceArray.createNestedArray();
-						newEntry.add(value["login"]);
-						newEntry.add(value["password"]);
-					}
-				}
-				serializeJson(readedPasswords, Serial);
-				const char *key = readedCommand["master_key"];
-				cipher->setKey((char *)key);
+					serializeJson(readedPasswords, Serial);
+					const char *key = readedCommand["master_key"];
+					cipher->setKey((char *)key);
 
-				String passwordsString;
-				serializeJson(readedPasswords, passwordsString);
-				Serial.printf("%s", passwordsString);
+					String passwordsString;
+					serializeJson(readedPasswords, passwordsString);
+					Serial.printf("%s", passwordsString);
 
-				String cipherString = cipher->encryptString(passwordsString);
+					String cipherString = cipher->encryptString(passwordsString);
 
-				File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
-				if (newFile.print(cipherString))
-					Serial.printf("Passwords file create OK");
-				newFile.close();
-
+					File newFile = SPIFFS.open(PASSWORDS_FILE_PATH, FILE_WRITE);
+					if (newFile.print(cipherString))
+						Serial.printf("Passwords file create OK");
+					newFile.close();
 				}
 			}
 		}
-		#endif // MAINTANCE_MODE
-		#ifdef SECURE_NOTES
+#endif // MAINTANCE_MODE
+#ifdef SECURE_NOTES
 		else if (11 <= strlen(serialBuffer) && (strncmp("write_notes", serialBuffer, 11) == 0))
 		{
 			// Command struct
@@ -620,24 +622,21 @@ void loop()
 						Serial.println(decipheredString);
 					}
 				}
-			} else
+			}
+			else
 				Serial.printf("Unlock device...");
 		}
-		#endif // SECEURE_NOTES
+#endif // SECEURE_NOTES
 
-		#ifdef COPY_TO_PC
+#ifdef COPY_TO_PC
 		else if (14 <= strlen(serialBuffer) && (strncmp("get_curr_value", serialBuffer, 14) == 0))
 		{
 			if (!readedPasswords.isNull())
 			{
 				Serial.printf("%s\n", shareValue);
 			}
-		
 		}
 
-
-		#endif COPY_TO_PC
-
-
+#endif COPY_TO_PC
 	}
 }
